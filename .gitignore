@@ -1,0 +1,7 @@
+.agent/
+WEBAPP_quiz.md
+WEBAPP_visualisation.md
+AGENT.md
+*.json
+!sections.json
+id_*

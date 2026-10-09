@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JLPT N2 Quiz</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <h1>JLPT N2 Quiz</h1>
+  <div id="timer" hidden>Time: <span id="timer-val">00:00</span><span id="timer-note"></span></div>
+</header>
+
+<!-- ============ SETUP ============ -->
+<section id="screen-setup" class="card">
+  <h2>New session</h2>
+
+  <fieldset>
+    <legend>Source</legend>
+    <label class="radio"><input type="radio" name="source" value="pool" checked> Shuffled pool</label>
+    <label class="radio"><input type="radio" name="source" value="exam"> Single exam</label>
+    <label class="radio"><input type="radio" name="source" value="mock"> Mock exam (current-era shape)</label>
+    <div class="row" id="row-category">
+      <label for="sel-category">Category:</label>
+      <select id="sel-category"></select>
+    </div>
+    <div class="row" id="row-exam" hidden>
+      <label for="sel-exam">Exam:</label>
+      <select id="sel-exam"></select>
+    </div>
+    <p class="muted" id="mock-note" hidden></p>
+  </fieldset>
+
+  <fieldset id="mode-field">
+    <legend>Mode</legend>
+    <label class="radio"><input type="radio" name="mode" value="limited" checked> Limited questions</label>
+    <label class="radio"><input type="radio" name="mode" value="unlimited"> Unlimited (ends when pool is exhausted)</label>
+    <div class="row" id="row-limit">
+      <label for="limit-n">Question limit:</label>
+      <input type="number" id="limit-n" value="20" min="1" max="2134">
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Options</legend>
+    <label class="check"><input type="checkbox" id="chk-instant"> Instant correction (timer pauses while feedback is shown)</label>
+    <div class="row">
+      <label for="sel-hl">Highlight style:</label>
+      <select id="sel-hl">
+        <option value="bold" selected>Bold</option>
+        <option value="underline">Underline</option>
+        <option value="mark">Marker pen</option>
+        <option value="color">Red text</option>
+        <option value="off">Off</option>
+      </select>
+    </div>
+  </fieldset>
+
+  <p class="muted" id="pool-info"></p>
+  <p class="error" id="setup-error" hidden></p>
+  <button id="btn-start">Start</button>
+</section>
+
+<!-- ============ QUIZ ============ -->
+<section id="screen-quiz" class="card" hidden>
+  <div class="quiz-top">
+    <div id="quiz-meta"></div>
+    <div class="counter" id="quiz-counter"></div>
+  </div>
+  <div id="nav-grid" aria-label="Question selector"></div>
+  <div class="sec-head"><span class="sec-title" id="sec-title"></span><span class="sec-instruction" id="sec-instruction"></span></div>
+  <div id="passage-wrap"></div>
+  <h3 id="q-text"></h3>
+  <p class="key-marker" id="key-marker" hidden></p>
+  <div id="key-switch" class="key-switch"></div>
+  <div id="choices"></div>
+  <div id="feedback" hidden></div>
+  <div class="quiz-controls">
+    <button id="btn-prev">Back</button>
+    <button id="btn-next">Next</button>
+    <button id="btn-finish">Finish</button>
+  </div>
+  <div class="progress"><div id="progress-fill"></div></div>
+  <p class="muted" id="progress-label"></p>
+</section>
+
+<!-- ============ RESULTS ============ -->
+<section id="screen-results" class="card" hidden>
+  <h2>Results</h2>
+  <div class="stats" id="stats"></div>
+  <p class="muted" id="honesty"></p>
+  <p class="muted" id="time-line"></p>
+  <div id="review-list"></div>
+  <div class="quiz-controls">
+    <button id="btn-retry">Restart with same settings</button>
+    <button id="btn-new">New session</button>
+  </div>
+</section>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
