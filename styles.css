@@ -45,6 +45,10 @@ legend { padding: 0 6px; font-weight: bold; }
 .radio, .check { display: block; margin: 6px 0; }
 .row { display: flex; gap: 8px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
 .row[hidden] { display: none; }
+#row-problems[hidden] { display: none; }
+.prob-group { margin: 8px 0; }
+.prob-group legend { cursor: pointer; }
+.prob-item { display: inline-block; margin: 4px 12px 4px 0; }
 .muted { color: var(--muted); }
 .error { color: var(--bad); font-weight: bold; }
 button {

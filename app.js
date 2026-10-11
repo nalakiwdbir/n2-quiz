@@ -1,6 +1,12 @@
 "use strict";
 /* JLPT N2 quiz app. Data via window.QUIZ_DATA (data.js). file:// safe. */
 var D = window.QUIZ_DATA;
+// Section -> display title + category, derived from data (no hardcoded text).
+var SEC_TITLES = {}, SEC_CATS = {};
+D.questions.forEach(function (q) {
+  SEC_TITLES[q.section] = q.secTitle;
+  SEC_CATS[q.section] = q.category;
+});
 var VOCAB_SECS = [1, 2, 3, 4, 5, 6];
 var GRAMMAR_SECS = [7, 8, 9];
 // Current-paper per-section quotas (B13): every 問題 present in paper
@@ -63,8 +69,8 @@ function applyHlStyle(v) {
 function filteredPool(cfg) {
   var pool = D.questions;
   if (cfg.source === "exam") pool = pool.filter(function (q) { return q.exam === cfg.exam; });
-  else if (cfg.source === "pool" && cfg.category !== "all")
-    pool = pool.filter(function (q) { return q.category === cfg.category; });
+  else if (cfg.source === "pool" && cfg.sections && cfg.sections.length < 14)
+    pool = pool.filter(function (q) { return cfg.sections.indexOf(q.section) >= 0; });
   return pool;
 }
 function makeUnits(pool) {
@@ -116,8 +122,10 @@ function buildMockList() {
 function sessionTitle(cfg) {
   if (cfg.source === "mock") return "Mock exam (current-era shape)";
   if (cfg.source === "exam") return "Exam " + cfg.exam;
-  var c = cfg.category === "all" ? "all categories" : cfg.category;
-  return "Shuffled pool — " + c;
+  if (!cfg.sections || cfg.sections.length >= 14) return "Shuffled pool — all categories";
+  return "Shuffled pool — " + cfg.sections.map(function (s) {
+    return SEC_TITLES[s] || ("S" + s);
+  }).join(", ");
 }
 
 /* ---------- state ---------- */
@@ -368,11 +376,19 @@ function stemHTML(text, hl) {
 }
 function renderQuestion(q) {
   var wrap = $("passage-wrap");
+  // B14: remember fold states keyed by passage id so re-renders (e.g. key
+  // switching) never unfold what the user folded; unseen passages open.
+  var foldOpen = {};
+  wrap.querySelectorAll("details.passage-fold").forEach(function (d) {
+    var pid = d.getAttribute("data-pid");
+    if (pid) foldOpen[pid] = d.open;
+  });
   wrap.innerHTML = "";
   (q.pids || []).forEach(function (pid, n) {
     var det = document.createElement("details");
     det.className = "passage-fold";
-    det.open = true;
+    det.setAttribute("data-pid", pid);
+    det.open = (pid in foldOpen) ? foldOpen[pid] : true;
     var sum = document.createElement("summary");
     sum.textContent = (q.pids.length > 1 ? "Passage " + (n + 1) + " " : "Passage ") +
       "(tap to collapse)";
@@ -625,73 +641,93 @@ function renderResults() {
       var det = document.createElement("details");
       det.className = "review-item";
       var sum = document.createElement("summary");
+      // B14: no grading-key tag — the switcher is an explanation viewer
+      // (B10); only the verdict tag shows.
       sum.innerHTML = esc("#" + (i + 1) + " " + (q.secTitle || ("問題" + q.section)) +
-        " (" + q.number + ") [" + keyLabel(S.akey[i]) + "]") + tag;
+        " (" + q.number + ")") + tag;
       det.appendChild(sum);
       var body = document.createElement("div");
-      var h = '<div class="sec-head"><span class="sec-title">' +
-        esc(q.secTitle || ("問題" + q.section)) + "</span>" +
-        '<span class="sec-instruction">' + esc(q.instruction || "") + "</span></div>";
-      (q.pids || []).forEach(function (pid) {
-        h += '<details><summary>Passage</summary><div class="passage">' +
-          passageHTML(pid) + "</div></details>";
-      });
-      h += "<div>" + stemHTML(q.text, q.hl) + "</div>";
-      var k = q.keys[S.akey[i]];
-      for (var c = 1; c <= 4; c++) {
-        var mark = "";
-        if (!q.conflict && k && c === k.correct) mark = " ✓";
-        var your = (S.pick[i] === c) ? " (your pick)" : "";
-        h += '<p class="choice' +
-          ((!q.conflict && k && c === k.correct) ? " correct" : "") +
-          ((S.pick[i] === c && v === "incorrect") ? " wrong" : "") + '">' +
-          esc(c + ". " + q.choices[c - 1] + mark + your) + "</p>";
-      }
-      // Per-question key switcher (mirrors the quiz panel): all key types
-      // always shown; unavailable ones greyed out (B4).
-      var swHTML = '<div class="key-switch">';
-      D.priority.forEach(function (t) {
-        if (q.keys[t]) {
-          swHTML += '<button data-rkey="' + esc(t) + '"' +
-            (t === S.akey[i] ? ' class="picked"' : "") + ">" +
-            esc(keyLabel(t) + (q.keys[t].hasExpl ? "" : " (no expl.)")) + "</button>";
-        } else {
-          swHTML += '<button disabled title="' +
-            esc("No " + keyLabel(t) + " key for this question") + '">' +
-            esc(keyLabel(t)) + "</button>";
-        }
-      });
-      swHTML += "</div>";
-      h += swHTML;
-      // Divergence flag across ALL available keys (human + AI).
-      var div = divergentKeys(q);
-      if (div)
-        h += '<p class="key-marker">' +
-          esc("⚠ keys disagree on the answer (" + div + ")") + "</p>";
-      h += keyContentHTML(q, S.akey[i], v);
-      body.innerHTML = h;
-      body.querySelectorAll(".key-switch button").forEach(function (b) {
-        b.addEventListener("click", function () {
-          S.akey[i] = b.getAttribute("data-rkey");
-          renderResults(); // tiles + review recompute; conflicts stay Unknown
-        });
-      });
       det.appendChild(body);
+      refreshReviewItem(i, body); // builds body + switcher listeners
       rev.appendChild(det);
     })(i);
   }
+}
+// B14: rebuild ONE review item in place — the <details> element (and its
+// open state) is never touched, so switching keys can't collapse it or
+// move page scroll. Tiles/verdicts are key-independent (B10), hence need
+// no recompute.
+function refreshReviewItem(i, body) {
+  var q = S.list[i];
+  var v = verdict(q, S.pick[i], S.akey[i]);
+  var h = '<div class="sec-head"><span class="sec-title">' +
+    esc(q.secTitle || ("問題" + q.section)) + "</span>" +
+    '<span class="sec-instruction">' + esc(q.instruction || "") + "</span></div>";
+  (q.pids || []).forEach(function (pid) {
+    h += '<details><summary>Passage</summary><div class="passage">' +
+      passageHTML(pid) + "</div></details>";
+  });
+  h += "<div>" + stemHTML(q.text, q.hl) + "</div>";
+  var k = q.keys[S.akey[i]];
+  for (var c = 1; c <= 4; c++) {
+    var mark = "";
+    if (!q.conflict && k && c === k.correct) mark = " ✓";
+    var your = (S.pick[i] === c) ? " (your pick)" : "";
+    h += '<p class="choice' +
+      ((!q.conflict && k && c === k.correct) ? " correct" : "") +
+      ((S.pick[i] === c && v === "incorrect") ? " wrong" : "") + '">' +
+      esc(c + ". " + q.choices[c - 1] + mark + your) + "</p>";
+  }
+  // Per-question key switcher (mirrors the quiz panel): all key types
+  // always shown; unavailable ones greyed out (B4).
+  var swHTML = '<div class="key-switch">';
+  D.priority.forEach(function (t) {
+    if (q.keys[t]) {
+      swHTML += '<button data-rkey="' + esc(t) + '"' +
+        (t === S.akey[i] ? ' class="picked"' : "") + ">" +
+        esc(keyLabel(t) + (q.keys[t].hasExpl ? "" : " (no expl.)")) + "</button>";
+    } else {
+      swHTML += '<button disabled title="' +
+        esc("No " + keyLabel(t) + " key for this question") + '">' +
+        esc(keyLabel(t)) + "</button>";
+    }
+  });
+  swHTML += "</div>";
+  h += swHTML;
+  // Divergence flag across ALL available keys (human + AI).
+  var div = divergentKeys(q);
+  if (div)
+    h += '<p class="key-marker">' +
+      esc("⚠ keys disagree on the answer (" + div + ")") + "</p>";
+  h += keyContentHTML(q, S.akey[i], v);
+  body.innerHTML = h;
+  body.querySelectorAll(".key-switch button").forEach(function (b) {
+    if (b.disabled) return;
+    b.addEventListener("click", function () {
+      S.akey[i] = b.getAttribute("data-rkey");
+      refreshReviewItem(i, body);
+    });
+  });
 }
 function statBox(n, label) {
   return '<div class="stat"><b>' + n + "</b><span>" + esc(label) + "</span></div>";
 }
 
 /* ---------- setup screen ---------- */
+function selectedSections() {
+  var out = [];
+  document.querySelectorAll('#prob-groups input[data-sec]').forEach(function (el) {
+    if (el.checked) out.push(parseInt(el.getAttribute("data-sec"), 10));
+  });
+  out.sort(function (a, b) { return a - b; });
+  return out;
+}
 function setupState() {
   var src = document.querySelector('input[name="source"]:checked').value;
   var mode = document.querySelector('input[name="mode"]:checked').value;
   return {
     source: src,
-    category: $("sel-category").value,
+    sections: selectedSections(),
     exam: $("sel-exam").value,
     mode: (src === "mock" || src === "exam") ? "limited" : mode,
     limit: Math.max(1, parseInt($("limit-n").value, 10) || 20),
@@ -703,7 +739,7 @@ function setupState() {
 function refreshSetup() {
   var src = document.querySelector('input[name="source"]:checked').value;
   var mode = document.querySelector('input[name="mode"]:checked').value;
-  $("row-category").hidden = (src !== "pool");
+  $("row-problems").hidden = (src !== "pool");
   $("row-exam").hidden = (src !== "exam");
   var mock = (src === "mock");
   var fixed = mock || (src === "exam"); // full paper up front, no streaming
@@ -728,7 +764,9 @@ function refreshSetup() {
 
   var info = "";
   var err = "";
-  if (!pool.length) {
+  if (src === "pool" && cfg.sections.length === 0) {
+    err = "Select at least one problem to start.";
+  } else if (!pool.length) {
     err = "No questions match this filter.";
   } else if (src === "mock") {
     info = "Mock pool: " + pool.length + " questions — paper will be ~71–75 " +
@@ -750,13 +788,45 @@ function refreshSetup() {
   $("btn-start").disabled = !!err;
 }
 function initSetup() {
-  var sc = $("sel-category");
-  var cats = ["all"].concat(D.categories);
-  cats.forEach(function (c) {
-    var o = document.createElement("option");
-    o.value = c;
-    o.textContent = (c === "all") ? "All categories" : c;
-    sc.appendChild(o);
+  // Problem checkboxes grouped by category (B15), nothing checked initially.
+  var pg = $("prob-groups");
+  var secCount = {};
+  D.questions.forEach(function (q) {
+    secCount[q.section] = (secCount[q.section] || 0) + 1;
+  });
+  var byCat = {};
+  D.categories.forEach(function (c) { byCat[c] = []; });
+  Object.keys(SEC_CATS).forEach(function (s) {
+    byCat[SEC_CATS[s]].push(parseInt(s, 10));
+  });
+  D.categories.forEach(function (c) {
+    var fs = document.createElement("fieldset");
+    fs.className = "prob-group";
+    var lg = document.createElement("legend");
+    lg.textContent = c;
+    lg.title = "Click to toggle the whole group";
+    lg.addEventListener("click", function () {
+      var boxes = fs.querySelectorAll('input[data-sec]');
+      var anyOff = false, i;
+      for (i = 0; i < boxes.length; i++) if (!boxes[i].checked) anyOff = true;
+      for (i = 0; i < boxes.length; i++) boxes[i].checked = anyOff;
+      refreshSetup();
+    });
+    fs.appendChild(lg);
+    byCat[c].sort(function (a, b) { return a - b; }).forEach(function (s) {
+      var lab = document.createElement("label");
+      lab.className = "check prob-item";
+      var cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.setAttribute("data-sec", s);
+      cb.checked = false; // B15: start unchecked; Start gated until >= 1
+      cb.addEventListener("change", refreshSetup);
+      lab.appendChild(cb);
+      lab.appendChild(document.createTextNode(" " + (SEC_TITLES[s] || ("S" + s)) +
+        " (" + (secCount[s] || 0) + ")"));
+      fs.appendChild(lab);
+    });
+    pg.appendChild(fs);
   });
   var se = $("sel-exam");
   D.exams.forEach(function (e) {
@@ -768,7 +838,7 @@ function initSetup() {
     .forEach(function (el) {
       el.addEventListener("change", refreshSetup);
     });
-  ["sel-category", "sel-exam", "limit-n", "chk-instant", "sel-hl"].forEach(function (id) {
+  ["sel-exam", "limit-n", "chk-instant", "sel-hl"].forEach(function (id) {
     $(id).addEventListener("change", refreshSetup);
     $(id).addEventListener("input", refreshSetup);
   });
@@ -818,6 +888,16 @@ function runDemo() {
     document.querySelectorAll('input[name="mode"]').forEach(function (el) {
       el.checked = (el.value === modeVal);
     });
+    // Test-only problem selection (?secs=1,3 or ?secs= for none).
+    if (p.has("secs")) {
+      var want = {};
+      p.get("secs").split(",").forEach(function (x) {
+        if (x) want[parseInt(x, 10)] = 1;
+      });
+      document.querySelectorAll('#prob-groups input[data-sec]').forEach(function (el) {
+        el.checked = !!want[parseInt(el.getAttribute("data-sec"), 10)];
+      });
+    }
     refreshSetup();
     if (!p.has("demo")) return;
   } else if (!p.has("demo")) return;
@@ -825,19 +905,19 @@ function runDemo() {
   var instant = p.get("instant") !== "0";
   if (which === "quiz") {
     startSession({
-      source: "pool", category: "all", mode: "limited", limit: 5,
+      source: "pool", sections: [1,2,3,4,5,6,7,8,9,10,11,12,13,14], mode: "limited", limit: 5,
       instant: false, prefKey: "jlpt",
     });
   } else if (which === "results") {
     startSession({
-      source: "pool", category: "all", mode: "limited", limit: 5,
+      source: "pool", sections: [1,2,3,4,5,6,7,8,9,10,11,12,13,14], mode: "limited", limit: 5,
       instant: false, prefKey: "jlpt",
     });
     for (var i = 0; i < S.list.length; i++) S.pick[i] = 1;
     finishSession();
   } else if (which === "mock") {
     startSession({
-      source: "mock", category: "all", mode: "limited", limit: 0,
+      source: "mock", sections: [1,2,3,4,5,6,7,8,9,10,11,12,13,14], mode: "limited", limit: 0,
       instant: false, prefKey: "jlpt",
     });
     if (tickTimer) clearInterval(tickTimer);
@@ -873,7 +953,7 @@ function runDemo() {
       return q.pids && q.pids.length && q.section >= 10;
     }).slice(0, 3);
     S = newState({
-      source: "pool", category: "all", mode: "limited", limit: 3,
+      source: "pool", sections: [1,2,3,4,5,6,7,8,9,10,11,12,13,14], mode: "limited", limit: 3,
       instant: false, prefKey: "jlpt",
     }, rq, null);
     S.running = true; S.startedAt = Date.now();
@@ -882,7 +962,7 @@ function runDemo() {
   } else if (which === "stream") {
     var n = Math.max(1, parseInt(p.get("n") || "5", 10));
     var scfg = {
-      source: p.get("source") || "pool", category: "all", mode: "unlimited",
+      source: p.get("source") || "pool", sections: [1,2,3,4,5,6,7,8,9,10,11,12,13,14], mode: "unlimited",
       limit: 0, instant: instant, prefKey: p.get("key") || "jlpt",
       exam: p.get("exam") || D.exams[0],
       _forceStream: p.get("forcestream") === "1", // test-only bypass
@@ -936,7 +1016,7 @@ function runDemo() {
     var hit = D.questions.filter(function (q) { return q.id === qid; });
     if (hit.length) {
       S = newState({
-        source: "pool", category: "all", mode: "limited", limit: 1,
+        source: "pool", sections: [1,2,3,4,5,6,7,8,9,10,11,12,13,14], mode: "limited", limit: 1,
         instant: instant, prefKey: p.get("key") || "jlpt",
       }, hit.slice(0, 1), null);
       S.running = true; S.startedAt = Date.now();
@@ -960,6 +1040,16 @@ function runDemo() {
   }
   if (p.get("expand") === "1") {
     document.querySelectorAll("details").forEach(function (d) { d.open = true; });
+  }
+  // Test-only review key-switch (?rkey=idx:key): clicks the real handler on
+  // the results screen, so open-state preservation is genuinely exercised.
+  if (p.get("rkey")) {
+    var rk = p.get("rkey").split(":");
+    var ritem = document.querySelectorAll("#review-list .review-item")[parseInt(rk[0], 10)];
+    if (ritem) {
+      var rbtn = ritem.querySelector('.key-switch button[data-rkey="' + rk[1] + '"]');
+      if (rbtn) rbtn.click();
+    }
   }
   if (p.get("hl")) applyHlStyle(p.get("hl"));
   if (p.get("measure") === "1") {
