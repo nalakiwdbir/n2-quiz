@@ -49,6 +49,9 @@ legend { padding: 0 6px; font-weight: bold; }
 .prob-group { margin: 8px 0; }
 .prob-group legend { cursor: pointer; }
 .prob-item { display: inline-block; margin: 4px 12px 4px 0; }
+.rf-item { display: inline-block; margin: 4px 12px 4px 0; }
+#review-filter { margin: 4px 0; }
+#review-filter[hidden] { display: none; }
 .muted { color: var(--muted); }
 .error { color: var(--bad); font-weight: bold; }
 button {

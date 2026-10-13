@@ -59,6 +59,15 @@ function effKey(q, pref) {
   return (pref && q.keys[pref]) ? pref : q.defaultKey;
 }
 function keyLabel(t) { return t === "ai" ? "AI" : t; }
+function toggleAllBoxes(container, after) {
+  // Shared group-toggle rule (B15 problem groups, B21 filter section):
+  // any-off -> check all, else uncheck all; then run the follow-up.
+  var boxes = container.querySelectorAll('input[type="checkbox"]');
+  var anyOff = false, i;
+  for (i = 0; i < boxes.length; i++) if (!boxes[i].checked) anyOff = true;
+  for (i = 0; i < boxes.length; i++) boxes[i].checked = anyOff;
+  if (after) after();
+}
 function applyHlStyle(v) {
   var ok = ["bold", "underline", "mark", "color", "off"];
   document.body.setAttribute("data-hlstyle",
@@ -636,6 +645,36 @@ function renderResults() {
   $("time-line").textContent = "Total time " + mmss(t) +
     (total ? " · avg " + mmss(t / total) + " per question" : "");
 
+  // B20/B21: per-status review filter in a "Filter" section mirroring the
+  // problem groups (all checked = show all, as before).
+  var rf = $("review-filter");
+  rf.innerHTML = "";
+  var ffs = document.createElement("fieldset");
+  ffs.className = "prob-group";
+  var flg = document.createElement("legend");
+  flg.textContent = "Filter";
+  flg.title = "Click to toggle all";
+  flg.addEventListener("click", function () {
+    toggleAllBoxes(ffs, applyReviewFilter);
+  });
+  ffs.appendChild(flg);
+  [["correct", correct], ["incorrect", incorrect], ["blank", blank],
+   ["unknown", unknown]].forEach(function (pair) {
+    var lab = document.createElement("label");
+    lab.className = "check rf-item";
+    var cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.setAttribute("data-verdict", pair[0]);
+    cb.checked = true;
+    cb.addEventListener("change", applyReviewFilter);
+    lab.appendChild(cb);
+    lab.appendChild(document.createTextNode(" " +
+      pair[0].charAt(0).toUpperCase() + pair[0].slice(1) +
+      " (" + pair[1] + ")"));
+    ffs.appendChild(lab);
+  });
+  rf.appendChild(ffs);
+
   var rev = $("review-list");
   rev.innerHTML = "";
   for (i = 0; i < S.list.length; i++) {
@@ -649,6 +688,7 @@ function renderResults() {
         '<span class="tag skip">no key</span>';
       var det = document.createElement("details");
       det.className = "review-item";
+      det.setAttribute("data-verdict", v);
       var sum = document.createElement("summary");
       // B14: no grading-key tag — the switcher is an explanation viewer
       // (B10); only the verdict tag shows.
@@ -661,6 +701,23 @@ function renderResults() {
       rev.appendChild(det);
     })(i);
   }
+  applyReviewFilter(); // honor checkbox states (all checked = show all)
+}
+// B20: show/hide review items by status checkbox. In-place visibility only:
+// open items, scroll, tiles and verdicts are untouched.
+function applyReviewFilter() {
+  var on = {};
+  document.querySelectorAll('#review-filter input[data-verdict]').forEach(function (el) {
+    on[el.getAttribute("data-verdict")] = el.checked;
+  });
+  var shown = 0;
+  document.querySelectorAll("#review-list .review-item").forEach(function (det) {
+    var v = det.getAttribute("data-verdict");
+    var show = (v === "nokey") ? true : !!on[v];
+    det.hidden = !show;
+    if (show) shown++;
+  });
+  $("review-empty").hidden = shown > 0;
 }
 // B14: rebuild ONE review item in place — the <details> element (and its
 // open state) is never touched, so switching keys can't collapse it or
@@ -815,11 +872,7 @@ function initSetup() {
     lg.textContent = c;
     lg.title = "Click to toggle the whole group";
     lg.addEventListener("click", function () {
-      var boxes = fs.querySelectorAll('input[data-sec]');
-      var anyOff = false, i;
-      for (i = 0; i < boxes.length; i++) if (!boxes[i].checked) anyOff = true;
-      for (i = 0; i < boxes.length; i++) boxes[i].checked = anyOff;
-      refreshSetup();
+      toggleAllBoxes(fs, refreshSetup);
     });
     fs.appendChild(lg);
     byCat[c].sort(function (a, b) { return a - b; }).forEach(function (s) {
@@ -1082,6 +1135,24 @@ function runDemo() {
   }
   if (p.get("expand") === "1") {
     document.querySelectorAll("details").forEach(function (d) { d.open = true; });
+  }
+  // Test-only review status filter (?show=incorrect,blank or ?show= for
+  // none): checks the matching boxes and runs the real filter path.
+  if (p.get("show") !== null && !$("screen-results").hidden) {
+    var want = {};
+    p.get("show").split(",").forEach(function (x) {
+      if (x) want[x] = 1;
+    });
+    document.querySelectorAll('#review-filter input[data-verdict]').forEach(function (el) {
+      el.checked = !!want[el.getAttribute("data-verdict")];
+    });
+    applyReviewFilter();
+  }
+  // Test-only filter legend toggle (?togglefilter=1): clicks the real
+  // legend handler on the results screen.
+  if (p.get("togglefilter") === "1" && !$("screen-results").hidden) {
+    var fl = document.querySelector('#review-filter fieldset.prob-group legend');
+    if (fl) fl.click();
   }
   // Test-only review key-switch (?rkey=idx:key): clicks the real handler on
   // the results screen, so open-state preservation is genuinely exercised.
