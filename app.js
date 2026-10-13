@@ -255,10 +255,12 @@ function showScreen(which) {
     $("screen-" + s).hidden = (s !== which);
   });
   $("timer").hidden = (which !== "quiz");
+  refreshEdgeZones();
 }
 function renderAll() {
   if (!S) return;
   syncTimerPause();
+  refreshEdgeZones();
   var cfg = S.config, q = S.list[S.idx];
   var title = sessionTitle(cfg) + (cfg.instant ? " · instant correction" : "");
   $("quiz-meta").textContent = title;
@@ -285,6 +287,13 @@ function renderNav() {
       b.textContent = i + 1;
       if (S.pick[i] != null || S.done[i]) b.className = "done";
       if (i === S.idx) b.className += (b.className ? " " : "") + "current";
+      else if (S.config.instant && S.done[i]) {
+        // B16: instant-only verdict tint (current keeps `current`,
+        // unanswered/unknown/blank keep existing styling).
+        var vi = verdict(S.list[i], S.pick[i], S.akey[i]);
+        if (vi === "correct") b.className += (b.className ? " " : "") + "good";
+        else if (vi === "incorrect") b.className += (b.className ? " " : "") + "bad";
+      }
       b.addEventListener("click", function () { S.idx = i; renderAll(); });
       nav.appendChild(b);
     })(i);
@@ -851,11 +860,40 @@ function initSetup() {
 }
 
 /* ---------- quiz wiring ---------- */
+function goPrev() {
+  if (!S || $("screen-quiz").hidden || S.idx <= 0) return;
+  S.idx--;
+  renderAll();
+}
+function goNext() {
+  if (!S || $("screen-quiz").hidden) return;
+  onNext();
+}
+function refreshEdgeZones() {
+  // B16 desktop-only edge strips mirror the Back/Next buttons (same
+  // handlers, same disabled rules). Hidden off the quiz screen entirely.
+  var onQuiz = S && !$("screen-quiz").hidden;
+  var atEnd = !!onQuiz && (S.idx + 1 >= S.list.length);
+  var zp = $("edge-prev"), zn = $("edge-next");
+  zp.hidden = !onQuiz;
+  zn.hidden = !onQuiz;
+  zp.disabled = !onQuiz || S.idx <= 0;
+  zn.disabled = !onQuiz || (!S.stream && atEnd);
+}
 function initQuiz() {
-  $("btn-prev").addEventListener("click", function () {
-    if (S.idx > 0) { S.idx--; renderAll(); }
+  $("btn-prev").addEventListener("click", goPrev);
+  $("btn-next").addEventListener("click", goNext);
+  $("edge-prev").addEventListener("click", function () { $("btn-prev").click(); });
+  $("edge-next").addEventListener("click", function () { $("btn-next").click(); });
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    var t = e.target && e.target.tagName;
+    if (t === "INPUT" || t === "SELECT" || t === "TEXTAREA") return;
+    if (!S || $("screen-quiz").hidden) return;
+    e.preventDefault();
+    if (e.key === "ArrowLeft") goPrev();
+    else goNext();
   });
-  $("btn-next").addEventListener("click", onNext);
   $("btn-finish").addEventListener("click", function () {
     var n = unansweredCount();
     var msg = n > 0 ? n + " unanswered. Finish anyway?"
@@ -1030,6 +1068,10 @@ function runDemo() {
       if (p.get("finish") === "1") finishSession();
     }
   }
+  // Test-only edge-zone navigation (?edge=left|right): drives the real
+  // Back/Next handlers, exactly as the strips and arrow keys do.
+  if (p.get("edge") === "left") goPrev();
+  else if (p.get("edge") === "right") goNext();
   var why = p.get("why");
   if (why === "click" || why === "click2") {
     var t = document.querySelector("details.why");
